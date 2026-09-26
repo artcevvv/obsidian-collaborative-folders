@@ -486,7 +486,8 @@ fileLinksRouter.get('/file-links/open', (req: Request, res: Response) => {
     return
   }
 
-  const deepLink = `obsidian://teams-open-file?token=${encodeURIComponent(token)}`
+  const serverUrl = resolveHttpBaseUrl(req)
+  const deepLink = `obsidian://teams-open-file?token=${encodeURIComponent(token)}&server=${encodeURIComponent(serverUrl)}`
   const deepLinkLiteral = JSON.stringify(deepLink)
   const escapedDeepLink = escapeHtml(deepLink)
   const escapedToken = escapeHtml(token)

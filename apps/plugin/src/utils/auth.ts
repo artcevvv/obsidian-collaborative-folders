@@ -191,7 +191,8 @@ export function refreshAccessTokenDeduped(
   const existing = refreshInFlightByFolder.get(folderId)
   if (existing) return existing
 
-  const request = refreshAccessToken(plugin.settings.serverUrl, refreshToken).finally(() => {
+  const serverUrl = plugin.getServerUrlForFolder(folderId)
+  const request = refreshAccessToken(serverUrl, refreshToken).finally(() => {
     refreshInFlightByFolder.delete(folderId)
   })
 
@@ -305,8 +306,9 @@ export async function createFileShareLink(
   if (payload.fileId) requestPayload.fileId = payload.fileId
   if (typeof payload.expiresInHours === 'number') requestPayload.expiresInHours = payload.expiresInHours
 
+  const serverUrl = plugin.getServerUrlForFolder(folderId)
   const response = await httpRequest(
-    `${plugin.settings.serverUrl}/api/folders/${encodeURIComponent(folderId)}/file-links`,
+    `${serverUrl}/api/folders/${encodeURIComponent(folderId)}/file-links`,
     {
       method: 'POST',
       headers: {
@@ -339,8 +341,9 @@ export async function listFolderMembers(
   folderId: string
 ): Promise<FolderMemberRecord[]> {
   const token = await getFolderBearerToken(plugin, folderId)
+  const serverUrl = plugin.getServerUrlForFolder(folderId)
   const response = await httpRequest(
-    `${plugin.settings.serverUrl}/api/folders/${encodeURIComponent(folderId)}/members`,
+    `${serverUrl}/api/folders/${encodeURIComponent(folderId)}/members`,
     {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -370,8 +373,9 @@ export async function listFolderInvites(
   folderId: string
 ): Promise<FolderInviteRecord[]> {
   const token = await getFolderBearerToken(plugin, folderId)
+  const serverUrl = plugin.getServerUrlForFolder(folderId)
   const response = await httpRequest(
-    `${plugin.settings.serverUrl}/api/folders/${encodeURIComponent(folderId)}/invites`,
+    `${serverUrl}/api/folders/${encodeURIComponent(folderId)}/invites`,
     {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -395,8 +399,9 @@ export async function revokeFolderInvite(
   tokenHash: string
 ): Promise<void> {
   const token = await getFolderBearerToken(plugin, folderId)
+  const serverUrl = plugin.getServerUrlForFolder(folderId)
   const response = await httpRequest(
-    `${plugin.settings.serverUrl}/api/folders/${encodeURIComponent(folderId)}/invites/${encodeURIComponent(tokenHash)}`,
+    `${serverUrl}/api/folders/${encodeURIComponent(folderId)}/invites/${encodeURIComponent(tokenHash)}`,
     {
       method: 'DELETE',
       headers: {
@@ -419,8 +424,9 @@ export async function removeFolderMember(
   rotate: RotateFolderKeyRequest
 ): Promise<RemoveMemberResponse> {
   const token = await getFolderBearerToken(plugin, folderId)
+  const serverUrl = plugin.getServerUrlForFolder(folderId)
   const response = await httpRequest(
-    `${plugin.settings.serverUrl}/api/folders/${encodeURIComponent(folderId)}/members/${encodeURIComponent(clientId)}`,
+    `${serverUrl}/api/folders/${encodeURIComponent(folderId)}/members/${encodeURIComponent(clientId)}`,
     {
       method: 'DELETE',
       headers: {
@@ -537,8 +543,9 @@ export async function resolveFileShareLink(
   const payload: ResolveFileShareLinkRequest = {
     token: normalizedToken,
   }
+  const serverUrl = plugin.getServerUrlForFolder(folderId)
   const response = await httpRequest(
-    `${plugin.settings.serverUrl}/api/folders/${encodeURIComponent(folderId)}/file-links/resolve`,
+    `${serverUrl}/api/folders/${encodeURIComponent(folderId)}/file-links/resolve`,
     {
       method: 'POST',
       headers: {

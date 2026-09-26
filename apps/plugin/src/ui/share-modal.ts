@@ -103,13 +103,14 @@ export class ShareFolderModal extends Modal {
     try {
       const { folderId, existingConfig } = await this.resolveFolderContext()
       folderIdForRefresh = folderId
-      const { displayName, clientId, serverUrl } = this.plugin.settings
+      const effectiveServerUrl = existingConfig?.serverUrl || this.plugin.settings.serverUrl
+      const { displayName, clientId } = this.plugin.settings
       const existingAccessToken = await getOrRefreshToken(this.plugin, folderId)
       const inviteLabel = this.inviteLabel.trim()
 
       const issueInvite = async () =>
         createInvite(
-          serverUrl,
+          effectiveServerUrl,
           folderId,
           this.folder.name,
           clientId,
@@ -149,7 +150,7 @@ export class ShareFolderModal extends Modal {
       if (!existingConfig) {
         const config: SharedFolderConfig = {
           folderId,
-          serverUrl: this.plugin.settings.serverUrl,
+          serverUrl: effectiveServerUrl,
           displayName: this.folder.name,
           members: [
             {

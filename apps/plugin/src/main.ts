@@ -123,7 +123,7 @@ export default class ObsidianTeamsPlugin extends Plugin {
     }
 
     this.keyManager = new FolderKeyManager(
-      this.settings.serverUrl,
+      (folderId) => this.getServerUrlForFolder(folderId),
       this.settings.clientId,
       (folderId, options) => getOrRefreshToken(this, folderId, options)
     )
@@ -131,7 +131,7 @@ export default class ObsidianTeamsPlugin extends Plugin {
 
     // Initialize YjsManager
     this.yjsManager = new YjsManager(
-      this.settings.serverUrl,
+      (folderId) => this.getServerUrlForFolder(folderId),
       this.settings.clientId,
       this.settings.displayName || 'Anonymous',
       (folderId, options) => getOrRefreshToken(this, folderId, options),
@@ -389,6 +389,15 @@ export default class ObsidianTeamsPlugin extends Plugin {
     return decoded.length > 0 ? decoded : null
   }
 
+  private resolveInviteServerFromDeepLink(params: ObsidianProtocolData): string | null {
+    const fromServer = typeof params.server === 'string' ? params.server : ''
+    const fromServerUrl = typeof params.serverUrl === 'string' ? params.serverUrl : ''
+    const raw = (fromServer || fromServerUrl).trim()
+    if (!raw) return null
+    const decoded = this.decodeProtocolParam(raw).trim()
+    return decoded.length > 0 ? decoded.replace(/\/+$/, '') : null
+  }
+
   private resolveFileShareTokenFromDeepLink(params: ObsidianProtocolData): string | null {
     return resolveFileShareTokenParam(params as unknown as Record<string, unknown>)
   }
@@ -463,13 +472,15 @@ export default class ObsidianTeamsPlugin extends Plugin {
 
   private async handleFileShareDeepLink(params: ObsidianProtocolData): Promise<void> {
     const token = this.resolveFileShareTokenFromDeepLink(params)
+    const serverUrlFromParam = this.resolveInviteServerFromDeepLink(params)
     if (!token) {
       new Notice('File link is missing token')
       return
     }
 
     try {
-      const preview = await previewFileShareLink(this.settings.serverUrl, token)
+      const serverUrl = serverUrlFromParam || this.settings.serverUrl
+      const preview = await previewFileShareLink(serverUrl, token)
       const sharedFolder = this.sharedFolders.find((sf) => sf.config.folderId === preview.folderId)
       if (!sharedFolder) {
         new Notice(`Shared folder '${preview.folderName}' is not joined on this device yet.`)
@@ -510,9 +521,9 @@ export default class ObsidianTeamsPlugin extends Plugin {
     settingsRoot?.openTabById?.('collaborative-folders')
   }
 
-  private async joinInviteTokenWithRetry(inviteToken: string) {
+  private async joinInviteTokenWithRetry(inviteToken: string, options: { serverUrl?: string } = {}) {
     try {
-      return await joinSharedFolderByInvite(this.app, this, inviteToken)
+      return await joinSharedFolderByInvite(this.app, this, inviteToken, options)
     } catch (error) {
       const raw = rawErrorMessage(error, 'Join failed')
       if (!isHostedSessionError(raw)) {
@@ -522,13 +533,17 @@ export default class ObsidianTeamsPlugin extends Plugin {
       if (!relinked) {
         throw error
       }
-      return joinSharedFolderByInvite(this.app, this, inviteToken)
+      return joinSharedFolderByInvite(this.app, this, inviteToken, options)
     }
   }
 
   async attemptInviteJoin(
     inviteToken: string,
-    options: { openSettingsOnConfigError?: boolean; suppressSuccessNotice?: boolean } = {}
+    options: {
+      serverUrl?: string
+      openSettingsOnConfigError?: boolean
+      suppressSuccessNotice?: boolean
+    } = {}
   ): Promise<boolean> {
     const token = inviteToken.trim()
     if (!token) {
@@ -536,14 +551,15 @@ export default class ObsidianTeamsPlugin extends Plugin {
       return false
     }
 
-    const existingJoin = this.inviteJoinInFlight.get(token)
+    const flightKey = options.serverUrl ? `${options.serverUrl}::${token}` : token
+    const existingJoin = this.inviteJoinInFlight.get(flightKey)
     if (existingJoin) {
       return existingJoin
     }
 
     const joinAttempt = (async (): Promise<boolean> => {
       try {
-        const result = await this.joinInviteTokenWithRetry(token)
+        const result = await this.joinInviteTokenWithRetry(token, { serverUrl: options.serverUrl })
         if (this.settings.pendingInviteToken) {
           this.settings.pendingInviteToken = ''
           await this.saveSettings()
@@ -572,22 +588,23 @@ export default class ObsidianTeamsPlugin extends Plugin {
       }
     })()
 
-    this.inviteJoinInFlight.set(token, joinAttempt)
+    this.inviteJoinInFlight.set(flightKey, joinAttempt)
     try {
       return await joinAttempt
     } finally {
-      this.inviteJoinInFlight.delete(token)
+      this.inviteJoinInFlight.delete(flightKey)
     }
   }
 
   private async handleInviteDeepLink(params: ObsidianProtocolData): Promise<void> {
     const inviteToken = this.resolveInviteTokenFromDeepLink(params)
+    const serverUrl = this.resolveInviteServerFromDeepLink(params) || undefined
     if (!inviteToken) {
       new Notice('Invite link is missing token')
       if (!this.settings.onboardingComplete) {
         new OnboardingModal(this.app, this).open()
       } else {
-        new JoinFolderModal(this.app, this).open()
+        new JoinFolderModal(this.app, this, { serverUrl }).open()
       }
       return
     }
@@ -599,7 +616,7 @@ export default class ObsidianTeamsPlugin extends Plugin {
       return
     }
 
-    await this.attemptInviteJoin(inviteToken)
+    await this.attemptInviteJoin(inviteToken, { serverUrl })
   }
 
   private normalizeBillingStatus(value: string): 'success' | 'cancel' | 'return' {
@@ -1003,9 +1020,11 @@ export default class ObsidianTeamsPlugin extends Plugin {
         continue
       }
 
+      const folderServerUrl = sf.config.serverUrl || this.getServerUrlForFolder(folderId)
+
       const fileTree = new FileTreeSync(
         folderId,
-        this.settings.serverUrl,
+        folderServerUrl,
         (options) => getOrRefreshToken(this, folderId, options),
         this.keyManager
       )
@@ -1030,7 +1049,7 @@ export default class ObsidianTeamsPlugin extends Plugin {
         fileTree,
         folderId,
         sf.path,
-        this.settings.serverUrl,
+        folderServerUrl,
         () => getOrRefreshToken(this, folderId),
         this.keyManager,
         (oldPath, newPath) => this.isRootRebindRename(oldPath, newPath)
@@ -1388,7 +1407,7 @@ export default class ObsidianTeamsPlugin extends Plugin {
   }
 
   /** Find the shared folder that contains the given path */
-  private getSharedFolderForPath(filePath: string): SharedFolderLocation | null {
+  getSharedFolderForPath(filePath: string): SharedFolderLocation | null {
     const targetPath = this.normalizePath(filePath)
     for (const sf of this.sharedFolders) {
       const sharedPath = this.normalizePath(sf.path)
@@ -1397,6 +1416,18 @@ export default class ObsidianTeamsPlugin extends Plugin {
       }
     }
     return null
+  }
+
+  /** Find the shared folder by its folderId */
+  getSharedFolderById(folderId: string): SharedFolderLocation | null {
+    return this.sharedFolders.find((sf) => sf.config.folderId === folderId) || null
+  }
+
+  /** Resolve effective serverUrl for a folder, falling back to global plugin setting */
+  getServerUrlForFolder(folderId: string): string {
+    const sf = this.getSharedFolderById(folderId)
+    const configured = sf?.config.serverUrl?.trim()
+    return (configured || this.settings.serverUrl || '').replace(/\/+$/, '')
   }
 
   /** Called when user opens a file — bind/unbind Yjs collaboration */

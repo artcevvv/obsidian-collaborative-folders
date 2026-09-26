@@ -49,12 +49,17 @@ export class FolderKeyManager {
   private inFlightByFolder = new Map<string, Promise<{ key: CryptoKey; epoch: number }>>()
 
   constructor(
-    private readonly serverUrl: string,
+    private readonly serverUrl: string | ((folderId: string) => string),
     private readonly clientId: string,
     private readonly getAuthToken: (folderId: string, options?: TokenOptions) => Promise<string | null>,
     private readonly keyStore = new KeyStore(),
     private readonly engine = new CryptoEngine()
   ) {}
+
+  private getServerUrl(folderId: string): string {
+    const raw = typeof this.serverUrl === 'function' ? this.serverUrl(folderId) : this.serverUrl
+    return (raw || '').replace(/\/+$/, '')
+  }
 
   clearFolderKeys(folderId: string): void {
     this.keyStore.clearFolderKeys(folderId)
@@ -77,7 +82,8 @@ export class FolderKeyManager {
     const pair = await this.keyStore.getOrCreateClientKeyPair(this.clientId)
     const publicKeyJwk = await this.engine.exportPublicKeyJwk(pair.publicKey)
 
-    const response = await httpRequest(`${this.serverUrl}/api/folders/${encodeURIComponent(folderId)}/keys/client-key`, {
+    const serverUrl = this.getServerUrl(folderId)
+    const response = await httpRequest(`${serverUrl}/api/folders/${encodeURIComponent(folderId)}/keys/client-key`, {
       method: 'PUT',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -269,9 +275,10 @@ export class FolderKeyManager {
     const token = await this.getAuthToken(folderId, options)
     if (!token) return null
 
+    const serverUrl = this.getServerUrl(folderId)
     const requestUrl = new URL(
       `/api/folders/${encodeURIComponent(folderId)}/keys/current-envelope`,
-      this.serverUrl
+      serverUrl
     )
     requestUrl.searchParams.set('allowMissing', '1')
 
@@ -314,8 +321,9 @@ export class FolderKeyManager {
   }
 
   private async fetchClientDirectory(folderId: string, token: string): Promise<ClientKeyDirectoryResponse> {
+    const serverUrl = this.getServerUrl(folderId)
     const response = await httpRequest(
-      `${this.serverUrl}/api/folders/${encodeURIComponent(folderId)}/keys/clients`,
+      `${serverUrl}/api/folders/${encodeURIComponent(folderId)}/keys/clients`,
       {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -328,8 +336,9 @@ export class FolderKeyManager {
   }
 
   private async fetchActiveCoverage(folderId: string, token: string): Promise<ActiveKeyCoverageResponse> {
+    const serverUrl = this.getServerUrl(folderId)
     const response = await httpRequest(
-      `${this.serverUrl}/api/folders/${encodeURIComponent(folderId)}/keys/active-coverage`,
+      `${serverUrl}/api/folders/${encodeURIComponent(folderId)}/keys/active-coverage`,
       {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -346,8 +355,9 @@ export class FolderKeyManager {
     token: string,
     envelopes: ActiveEnvelopeUpsertRequest['envelopes']
   ): Promise<void> {
+    const serverUrl = this.getServerUrl(folderId)
     const response = await httpRequest(
-      `${this.serverUrl}/api/folders/${encodeURIComponent(folderId)}/keys/active-envelopes`,
+      `${serverUrl}/api/folders/${encodeURIComponent(folderId)}/keys/active-envelopes`,
       {
         method: 'POST',
         headers: {
@@ -392,7 +402,8 @@ export class FolderKeyManager {
       })
     }
 
-    const rotateResponse = await httpRequest(`${this.serverUrl}/api/folders/${encodeURIComponent(folderId)}/keys/rotate`, {
+    const serverUrl = this.getServerUrl(folderId)
+    const rotateResponse = await httpRequest(`${serverUrl}/api/folders/${encodeURIComponent(folderId)}/keys/rotate`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,

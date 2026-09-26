@@ -84,24 +84,78 @@ async function assertNoSharedFolderConflict(
   }
 }
 
+export interface ParsedInviteInput {
+  inviteToken: string
+  serverUrl?: string
+}
+
+export function parseInviteInput(input: string): ParsedInviteInput {
+  const trimmed = input.trim()
+  if (!trimmed) {
+    return { inviteToken: '' }
+  }
+
+  // Handle obsidian://teams-join?token=...&server=...
+  if (trimmed.startsWith('obsidian://')) {
+    try {
+      const url = new URL(trimmed)
+      const token = url.searchParams.get('token') || url.searchParams.get('inviteToken') || ''
+      const server = url.searchParams.get('server') || url.searchParams.get('serverUrl') || undefined
+      if (token) {
+        return {
+          inviteToken: decodeURIComponent(token).trim(),
+          serverUrl: server ? decodeURIComponent(server).trim().replace(/\/+$/, '') : undefined,
+        }
+      }
+    } catch {
+      // Fall through to regex/raw token
+    }
+  }
+
+  // Handle http(s)://.../api/invite/redeem?token=...
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      const url = new URL(trimmed)
+      const token = url.searchParams.get('token') || url.searchParams.get('inviteToken') || ''
+      const serverParam = url.searchParams.get('server') || url.searchParams.get('serverUrl')
+      const serverUrl = serverParam
+        ? decodeURIComponent(serverParam).trim().replace(/\/+$/, '')
+        : `${url.protocol}//${url.host}`
+      if (token) {
+        return {
+          inviteToken: decodeURIComponent(token).trim(),
+          serverUrl,
+        }
+      }
+    } catch {
+      // Fall through to raw token
+    }
+  }
+
+  return { inviteToken: trimmed }
+}
+
 export async function joinSharedFolderByInvite(
   app: App,
   plugin: ObsidianTeamsPlugin,
-  inviteToken: string
+  inviteInput: string,
+  options: { serverUrl?: string } = {}
 ): Promise<JoinSharedFolderResult> {
-  const normalizedInviteToken = inviteToken.trim()
+  const parsed = parseInviteInput(inviteInput)
+  const normalizedInviteToken = parsed.inviteToken
   if (!normalizedInviteToken) {
     throw new Error('Please enter an invite token')
   }
 
-  const { clientId, displayName, serverUrl } = plugin.settings
+  const effectiveServerUrl = options.serverUrl || parsed.serverUrl || plugin.settings.serverUrl
+  const { clientId, displayName } = plugin.settings
   const hostedSessionToken =
     plugin.settings.deploymentMode === 'hosted-service'
       ? plugin.settings.hostedSessionToken || undefined
       : undefined
 
   const result = await redeemInvite(
-    serverUrl,
+    effectiveServerUrl,
     normalizedInviteToken,
     clientId,
     displayName || 'Anonymous',
@@ -124,7 +178,7 @@ export async function joinSharedFolderByInvite(
   const access = decodeAccessToken(result.accessToken)
   const config: SharedFolderConfig = {
     folderId: result.folderId,
-    serverUrl: result.serverUrl,
+    serverUrl: result.serverUrl || effectiveServerUrl,
     displayName: result.folderName,
     members: [
       {
@@ -148,13 +202,15 @@ export async function joinSharedFolderByInvite(
 export class JoinFolderModal extends Modal {
   private plugin: ObsidianTeamsPlugin
   private inviteToken = ''
+  private serverUrl?: string
   private actionInFlight = false
   private errorMessage = ''
 
-  constructor(app: App, plugin: ObsidianTeamsPlugin, options: { inviteToken?: string } = {}) {
+  constructor(app: App, plugin: ObsidianTeamsPlugin, options: { inviteToken?: string; serverUrl?: string } = {}) {
     super(app)
     this.plugin = plugin
     this.inviteToken = options.inviteToken?.trim() || ''
+    this.serverUrl = options.serverUrl?.trim() || undefined
   }
 
   onOpen() {
@@ -168,7 +224,7 @@ export class JoinFolderModal extends Modal {
 
     contentEl.createEl('h2', { text: 'Join shared folder' })
     contentEl.createEl('p', {
-      text: 'Paste the invite token you received from the folder owner.',
+      text: 'Paste the invite link or token you received from the folder owner.',
       cls: 'setting-item-description',
     })
 
@@ -180,10 +236,10 @@ export class JoinFolderModal extends Modal {
     }
 
     new Setting(contentEl)
-      .setName('Invite token')
+      .setName('Invite link or token')
       .addText((text) => {
         text
-          .setPlaceholder('Paste invite token here...')
+          .setPlaceholder('Paste invite link or token here...')
           .setValue(this.inviteToken)
           .setDisabled(this.actionInFlight)
           .onChange((value) => {
@@ -205,9 +261,9 @@ export class JoinFolderModal extends Modal {
   private async joinFolder() {
     if (this.actionInFlight) return
 
-    const token = this.inviteToken.trim()
-    if (!token) {
-      this.errorMessage = 'Please enter an invite token'
+    const input = this.inviteToken.trim()
+    if (!input) {
+      this.errorMessage = 'Please enter an invite token or link'
       this.render()
       return
     }
@@ -217,7 +273,7 @@ export class JoinFolderModal extends Modal {
     this.render()
 
     try {
-      const joined = await this.plugin.attemptInviteJoin(token)
+      const joined = await this.plugin.attemptInviteJoin(input, { serverUrl: this.serverUrl })
       if (joined) {
         this.close()
       }

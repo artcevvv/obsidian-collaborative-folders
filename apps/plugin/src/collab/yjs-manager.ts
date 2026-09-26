@@ -38,12 +38,17 @@ export class YjsManager {
   private onAuthFailure: ((event: AuthFailureEvent) => void) | null = null
 
   constructor(
-    private serverUrl: string,
+    private serverUrl: string | ((folderId: string) => string),
     private clientId: string,
     private displayName: string,
     private getAuthToken: (folderId: string, options?: TokenOptions) => Promise<string | null>,
     private keyManager: FolderKeyManager
   ) {}
+
+  private getServerUrl(folderId: string): string {
+    const raw = typeof this.serverUrl === 'function' ? this.serverUrl(folderId) : this.serverUrl
+    return (raw || '').replace(/\/+$/, '')
+  }
 
   /** Set callback for connection status changes */
   setStatusCallback(cb: (status: ConnectionStatus) => void): void {
@@ -74,8 +79,9 @@ export class YjsManager {
     // Dual provider: IndexedDB (local/offline) + encrypted WebSocket relay (network)
     const persistence = createOfflinePersistence(roomName, ydoc)
 
+    const serverUrl = this.getServerUrl(folderId)
     const wsProvider = new EncryptedProvider({
-      serverUrl: this.serverUrl,
+      serverUrl,
       roomName,
       folderId,
       ydoc,

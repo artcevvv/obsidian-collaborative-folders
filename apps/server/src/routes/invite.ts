@@ -390,7 +390,8 @@ inviteRouter.get('/redeem', (req: Request, res: Response) => {
     return
   }
 
-  const deepLink = `obsidian://teams-join?token=${encodeURIComponent(inviteToken)}`
+  const serverUrl = resolveHttpBaseUrl(req)
+  const deepLink = `obsidian://teams-join?token=${encodeURIComponent(inviteToken)}&server=${encodeURIComponent(serverUrl)}`
   const escapedDeepLink = escapeHtml(deepLink)
   const escapedInviteToken = escapeHtml(inviteToken)
   const escapedBratPluginUrl = escapeHtml(BRAT_PLUGIN_URL)
